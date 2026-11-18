@@ -1,11 +1,11 @@
 /* Interfaz de Onda: vistas, listas, buscador, reproductor a pantalla completa y ajustes. */
 (function () {
-  const APP_VERSION = '1.7 (18-nov)';
+  const APP_VERSION = '1.8 (18-nov)';
   const DB = window.OndaDB, P = window.OndaPlayer, Tags = window.OndaTags, Demo = window.OndaDemo;
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const icon = (n) => `<svg aria-hidden="true"><use href="#i-${n}"/></svg>`;
-  const coll = new Intl.Collator('es', { sensitivity: 'base', numeric: true });
+  const coll = new Intl.Collator('es', { sensitivity: 'base', numeric: true, ignorePunctuation: true });
   const norm = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
   const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
   const plural = (n, a, b) => `${n} ${n === 1 ? a : b}`;
@@ -62,7 +62,7 @@
     const u = coverUrl(t);
     if (u) return `<span class="cover ${cls}"><img src="${esc(u)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.remove()"></span>`;
     const seed = t ? t.album + t.artist : label; const h = hue(seed);
-    const letter = (t ? (t.album !== 'Sin álbum' ? t.album : t.title) : label || '♪').trim().charAt(0).toUpperCase();
+    const letter = (t ? (t.album !== 'Sin álbum' ? t.album : t.title) : label || '♪').replace(/^[^\p{L}\p{N}]+/u, '').charAt(0).toUpperCase() || '♪';
     return `<span class="cover cover-gen ${cls}" style="--h1:${h};--h2:${(h + 50) % 360}"><b>${esc(letter)}</b></span>`;
   }
   const artCache = new Map();
@@ -151,7 +151,12 @@
   function trackRows(tracks, key, from, opts = {}) {
     ctxs[key] = { ids: tracks.map((t) => t.id), from };
     const curId = P.currentId();
-    return `<ul class="rows" role="list">${tracks.map((t, i) => `
+    let lastL = null;
+    return `<ul class="rows" role="list">${tracks.map((t, i) => {
+      // Índice alfabético: encabezado al empezar cada letra.
+      let h = '';
+      if (opts.az) { const L = opts.az(t); if (L !== lastL) { lastL = L; h = `<li class="az-h" id="az-${L === '#' ? 'num' : L}" data-az="${L}">${L}</li>`; } }
+      return h + `
       <li class="row${t.id === curId ? ' is-cur' : ''}" data-id="${t.id}">
         <button type="button" class="row-main" data-ctx="${key}" data-i="${i}">
           ${opts.numbers ? `<span class="row-num">${t.id === curId ? '<span class="eqbars"><i></i><i></i><i></i></span>' : (t.trackNo || i + 1)}</span>` : coverHTML(t, 'cover-sm')}
@@ -159,7 +164,7 @@
           ${!opts.numbers && t.id === curId ? '<span class="eqbars"><i></i><i></i><i></i></span>' : ''}
         </button>
         <button type="button" class="icon-btn" data-more="${t.id}" data-pl="${opts.playlist || ''}" data-pi="${i}" aria-label="Opciones de ${esc(t.title)}">${icon('more')}</button>
-      </li>`).join('')}</ul>`;
+      </li>`; }).join('')}</ul>`;
   }
   function playCtx(key, i, shuffle) {
     const c = ctxs[key]; if (!c || !c.ids.length) return;
@@ -263,7 +268,23 @@
         <option value="titulo"${sort === 'titulo' ? ' selected' : ''}>Por título</option>
         <option value="artista"${sort === 'artista' ? ' selected' : ''}>Por artista</option>
         <option value="recientes"${sort === 'recientes' ? ' selected' : ''}>Más recientes</option></select></label></div>
-      ${trackRows(tracks, 'lib', 'Tu biblioteca')}`;
+      ${sort === 'recientes' ? trackRows(tracks, 'lib', 'Tu biblioteca') : azList(tracks, sort === 'artista' ? (t) => t.artist : (t) => t.title)}`;
+  }
+
+  /* ---------- Índice alfabético (A–Z) ---------- */
+  const AZ = ['#', ...'ABCDEFGHIJKLMN'.split(''), 'Ñ', ...'OPQRSTUVWXYZ'.split('')];
+  function letterOf(str) {
+    // Se ignoran signos iniciales (¿, ¡, comillas…), igual que al ordenar.
+    const c = String(str || '').replace(/^[^\p{L}\p{N}]+/u, '').charAt(0);
+    if (/ñ/i.test(c)) return 'Ñ';
+    const n = norm(c).toUpperCase();
+    return /[A-Z]/.test(n) ? n : '#';
+  }
+  function azList(tracks, field) {
+    const az = (t) => letterOf(field(t));
+    const have = new Set(tracks.map(az));
+    const rail = have.size > 1 ? `<nav class="az-rail" id="azRail" aria-label="Ir a una letra">${AZ.map((L) => `<button type="button" tabindex="-1" data-azgo="${L}" class="${have.has(L) ? '' : 'off'}" aria-label="Letra ${L === '#' ? 'números y símbolos' : L}">${L}</button>`).join('')}</nav><div class="az-bubble" id="azBubble" hidden></div>` : '';
+    return trackRows(tracks, 'lib', 'Tu biblioteca', { az }) + rail;
   }
 
   function vArtista(name) {
@@ -519,7 +540,37 @@
       render(true);
     };
   }
-  function bindSort() { const s = $('sortSel'); if (s) s.onchange = () => { save('sort', s.value); render(true); }; }
+  function azJump(L) {
+    const heads = [...view.querySelectorAll('.az-h')];
+    if (!heads.length) return;
+    const order = AZ.indexOf(L);
+    // la letra pedida, o la siguiente que exista (o la última)
+    const el = heads.find((h) => AZ.indexOf(h.dataset.az) >= order) || heads[heads.length - 1];
+    // Los encabezados quedan fijos arriba al bajar, así que se mide la primera canción de la letra.
+    const bar = document.querySelector('.bar').getBoundingClientRect().height;
+    const first = el.nextElementSibling || el;
+    window.scrollTo({ top: first.getBoundingClientRect().top + window.scrollY - bar - el.offsetHeight - 2 });
+  }
+  function bindAz() {
+    const rail = $('azRail'); if (!rail) return;
+    const bubble = $('azBubble');
+    const pick = (y) => {
+      const r = rail.getBoundingClientRect();
+      const i = Math.max(0, Math.min(AZ.length - 1, Math.floor(((y - r.top) / r.height) * AZ.length)));
+      const L = AZ[i];
+      if (bubble.textContent !== L) { bubble.textContent = L; azJump(L); if (navigator.vibrate) try { navigator.vibrate(5); } catch (e) { /* nada */ } }
+    };
+    rail.addEventListener('pointerdown', (e) => {
+      e.preventDefault(); rail.setPointerCapture(e.pointerId); rail.classList.add('active');
+      bubble.textContent = ''; bubble.hidden = false; pick(e.clientY);
+    });
+    rail.addEventListener('pointermove', (e) => { if (rail.hasPointerCapture(e.pointerId)) pick(e.clientY); });
+    const end = (e) => { if (rail.hasPointerCapture && rail.hasPointerCapture(e.pointerId)) rail.releasePointerCapture(e.pointerId); rail.classList.remove('active'); setTimeout(() => { bubble.hidden = true; }, 250); };
+    rail.addEventListener('pointerup', end); rail.addEventListener('pointercancel', end);
+    rail.addEventListener('click', (e) => e.preventDefault());
+  }
+  function bindSort() {
+    bindAz(); const s = $('sortSel'); if (s) s.onchange = () => { save('sort', s.value); render(true); }; }
   // Refrescar solo el resaltado de la canción en curso, sin redibujar la vista.
   function markCurrent() {
     const id = P.currentId();

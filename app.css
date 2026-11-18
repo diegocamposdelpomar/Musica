@@ -167,6 +167,16 @@ body.has-mini #view { padding-bottom: calc(var(--tabs-h) + var(--mini-h) + var(-
 .panel p { margin: 0 0 10px; }
 .panel .seg { margin: 0; }
 
+/* Índice alfabético */
+.az-h { position: sticky; top: calc(var(--bar-h) + var(--safe-t)); z-index: 2; margin: 6px 0 0; padding: 4px 0 4px 2px; background: var(--bg); color: var(--accent); font: 700 .95rem var(--head); list-style: none; }
+#libList:has(.az-rail) .rows { padding-right: 18px; }
+.az-rail { position: fixed; z-index: 22; right: max(0px, calc((100vw - 760px) / 2)); top: calc(var(--safe-t) + var(--bar-h) + 70px); bottom: calc(var(--tabs-h) + var(--safe-b) + 16px); width: 26px; display: flex; flex-direction: column; justify-content: space-evenly; align-items: center; touch-action: none; user-select: none; -webkit-user-select: none; border-radius: 13px; }
+body.has-mini .az-rail { bottom: calc(var(--tabs-h) + var(--mini-h) + var(--safe-b) + 20px); }
+.az-rail button { flex: 1; width: 100%; min-height: 0; padding: 0; border: 0; background: none; color: var(--accent); font: 700 .62rem/1 var(--font); cursor: pointer; display: grid; place-items: center; }
+.az-rail button.off { color: var(--muted); opacity: .45; }
+.az-rail.active { background: var(--surface2); }
+.az-bubble { position: fixed; z-index: 40; left: 50%; top: 42%; transform: translate(-50%, -50%); width: 88px; height: 88px; border-radius: 22px; display: grid; place-items: center; background: color-mix(in srgb, var(--surface2) 92%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); color: var(--accent); font: 700 2.6rem var(--head); box-shadow: var(--shadow); pointer-events: none; }
+
 /* Buscar en internet */
 .search-sm { margin: 2px 0 8px; }
 .search-sm input { height: 42px; }
