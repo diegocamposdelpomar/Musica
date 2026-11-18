@@ -162,6 +162,12 @@
   }
   function playCtx(key, i, shuffle) {
     const c = ctxs[key]; if (!c || !c.ids.length) return;
+    // Tocar la canción que ya suena no la reinicia: abre el reproductor (y la reanuda si estaba en pausa).
+    if (i != null && c.ids[i] === P.currentId()) {
+      if (P.audio.paused) P.play();
+      if (layers[layers.length - 1] === 'sheet') closeSheet(openNP); else openNP();
+      return;
+    }
     P.playList(c.ids, i == null ? null : c.ids[i], c.from, shuffle === undefined ? {} : { shuffle });
   }
   const playBar = (key, n, dur) => `<div class="play-row">
@@ -512,7 +518,7 @@
   // Refrescar solo el resaltado de la canción en curso, sin redibujar la vista.
   function markCurrent() {
     const id = P.currentId();
-    view.querySelectorAll('.row[data-id]').forEach((li) => {
+    document.querySelectorAll('#view .row[data-id], #sheetBody .row[data-id]').forEach((li) => {
       const on = li.dataset.id === id;
       if (on === li.classList.contains('is-cur')) return;
       li.classList.toggle('is-cur', on);
