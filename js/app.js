@@ -1,5 +1,6 @@
 /* Interfaz de Onda: vistas, listas, buscador, reproductor a pantalla completa y ajustes. */
 (function () {
+  const APP_VERSION = '1.5 (18-nov)';
   const DB = window.OndaDB, P = window.OndaPlayer, Tags = window.OndaTags, Demo = window.OndaDemo;
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -476,6 +477,7 @@
         <ul class="diag" id="diagOut"></ul></section>
       <section class="panel danger"><h2>Borrar</h2><p class="muted small">Elimina todas las canciones y listas guardadas en la app. Los archivos originales de tu teléfono no se tocan.</p>
         <button type="button" class="btn btn-bad" data-act="wipe">${icon('trash')}Borrar toda la biblioteca</button></section>
+      <p class="muted small center">Onda · versión ${APP_VERSION}</p>
       <p class="muted small center">Tu música guardada funciona sin internet y no se envía a ningún sitio. Solo la pestaña Buscar se conecta a los servicios que elijas, con lo que escribas.</p>`;
   }
   const notFound = (msg) => `<p class="muted center">${esc(msg)}</p><button type="button" class="btn btn-wide" data-go="#/inicio">Ir al inicio</button>`;
@@ -1021,6 +1023,7 @@
     const rows = [];
     const row = (ok, label, detail) => rows.push({ ok, label, detail });
     const uad = navigator.userAgentData;
+    row(null, 'Versión de Onda', APP_VERSION);
     row(null, 'Navegador', (uad && uad.brands ? uad.brands.map((b) => b.brand + ' ' + b.version).filter((x) => !/Not/i.test(x)).join(', ') + ' · ' : '') + navigator.userAgent);
     row(isSecureContext, 'Conexión segura (https)', isSecureContext ? 'sí' : 'no');
     row(isInstalled() ? true : null, 'Abierta como app instalada', isInstalled() ? 'sí' : 'no (estás en el navegador)');
@@ -1057,6 +1060,11 @@
   }
   window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvent = e; diag.bip = 'sí, ' + new Date().toLocaleTimeString('es'); if (route.name === 'inicio' || route.name === 'ajustes') render(true); });
   window.addEventListener('appinstalled', () => { installEvent = null; diag.installed = 'sí, ' + new Date().toLocaleTimeString('es'); toast('Onda se instaló. Búscala en tus apps (puede tardar unos segundos en aparecer).', 6000); render(true); });
+  // Si llega una versión nueva de la app mientras está abierta, se recarga sola una vez.
+  if (!isNative && 'serviceWorker' in navigator && navigator.serviceWorker.controller) {
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (!reloaded) { reloaded = true; location.reload(); } });
+  }
   if (!isNative && 'serviceWorker' in navigator && location.protocol.startsWith('http')) {
     window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
   }

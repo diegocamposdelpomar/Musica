@@ -1,6 +1,7 @@
-/* Guarda Onda en el teléfono para que abra sin internet. La música no pasa por aquí:
-   vive en IndexedDB. Al cambiar cualquier archivo, sube VERSION para que los teléfonos se actualicen. */
-const VERSION = 'onda-10';
+/* Guarda Onda en el teléfono para que abra sin internet. La música no pasa por aquí: vive en IndexedDB.
+   Con internet siempre se pide la versión más nueva (y se guarda); sin internet se usa la guardada.
+   Al cambiar archivos, sube VERSION y APP_VERSION (js/app.js). */
+const VERSION = 'onda-11';
 const FILES = [
   './', 'index.html', 'app.css', 'manifest.webmanifest',
   'js/db.js', 'js/tags.js', 'js/demo.js', 'js/player.js', 'js/online.js', 'js/app.js',
@@ -8,7 +9,10 @@ const FILES = [
 ];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(FILES)).then(() => self.skipWaiting()));
+  // cache: 'reload' evita guardar copias viejas de la caché HTTP del servidor.
+  e.waitUntil(caches.open(VERSION)
+    .then((c) => c.addAll(FILES.map((f) => new Request(f, { cache: 'reload' }))))
+    .then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (e) => {
@@ -18,11 +22,20 @@ self.addEventListener('activate', (e) => {
 });
 
 self.addEventListener('fetch', (e) => {
-  if (e.request.method !== 'GET' || new URL(e.request.url).origin !== location.origin) return;
-  e.respondWith(
-    caches.open(VERSION).then((c) => c.match(e.request, { ignoreSearch: true })).then((hit) => hit || fetch(e.request).catch(() => {
-      if (e.request.mode === 'navigate') return caches.match('index.html');
+  const req = e.request;
+  if (req.method !== 'GET' || new URL(req.url).origin !== location.origin) return;
+  e.respondWith((async () => {
+    const cache = await caches.open(VERSION);
+    try {
+      // (una petición de navegación no se puede copiar con opciones: se pide por su URL)
+      const fresh = await fetch(new Request(req.url, { cache: 'no-cache', credentials: 'same-origin' }));
+      if (fresh.ok) cache.put(req, fresh.clone());
+      return fresh;
+    } catch (err) {
+      const hit = await cache.match(req, { ignoreSearch: true });
+      if (hit) return hit;
+      if (req.mode === 'navigate') return (await cache.match('index.html')) || Response.error();
       return Response.error();
-    }))
-  );
+    }
+  })());
 });
