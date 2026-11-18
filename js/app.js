@@ -329,6 +329,10 @@
       <section class="panel"><h2>Sonido</h2>
         <div class="btns"><button type="button" class="btn" data-act="eq">${icon('eq')}Ecualizador</button><button type="button" class="btn" data-act="timer">${icon('timer')}Temporizador</button></div></section>
       <section class="panel"><h2>Instalar en el celular</h2>${installCard(true)}</section>
+      <section class="panel"><h2>Diagnóstico de instalación</h2>
+        <p class="muted small">Si no logras instalar Onda, toca «Revisar» y envía una captura de este recuadro.</p>
+        <div class="btns"><button type="button" class="btn" data-act="diag">Revisar</button><button type="button" class="btn" data-act="diagcopy">Copiar informe</button></div>
+        <ul class="diag" id="diagOut"></ul></section>
       <section class="panel danger"><h2>Borrar</h2><p class="muted small">Elimina todas las canciones y listas guardadas en la app. Los archivos originales de tu teléfono no se tocan.</p>
         <button type="button" class="btn btn-bad" data-act="wipe">${icon('trash')}Borrar toda la biblioteca</button></section>
       <p class="muted small center">Onda funciona sin internet y no envía tu música a ningún sitio: todo queda en este dispositivo.</p>`;
@@ -354,7 +358,12 @@
     const quota = $('quota');
     if (quota && navigator.storage && navigator.storage.estimate) navigator.storage.estimate().then((e) => { if (e.quota) quota.textContent = `Espacio usado por la app: ${fmtBytes(e.usage || 0)} de ${fmtBytes(e.quota)} disponibles.`; });
     const ib = $('installBtn');
-    if (ib) ib.onclick = async () => { const e = installEvent; installEvent = null; e.prompt(); await e.userChoice; render(true); };
+    if (ib) ib.onclick = async () => {
+      const e = installEvent; installEvent = null; diag.prompted = 'sí';
+      try { await e.prompt(); const c = await e.userChoice; diag.choice = c && c.outcome === 'accepted' ? 'aceptó' : 'canceló'; }
+      catch (err) { diag.choice = 'error: ' + (err && err.message || err); toast('Chrome no pudo abrir la instalación: usa el menú ⋮ → «Instalar app».', 5000); }
+      render(true);
+    };
   }
   // Refrescar solo el resaltado de la canción en curso, sin redibujar la vista.
   function markCurrent() {
@@ -571,7 +580,7 @@
     else if (d.listmore) listMenu(d.listmore);
     else if (d.go) location.hash = d.go;
     else if (d.themeSet) { save('theme', d.themeSet); applyTheme(); render(true); }
-    else if (d.act) ({ pick: pickFiles, demos: () => addDemos(t), newlist: newList, wipe, eq: eqSheet, timer: timerSheet, hideinstall: () => { save('noInstall', true); render(true); }, copylink: copyLink })[d.act]?.();
+    else if (d.act) ({ pick: pickFiles, demos: () => addDemos(t), newlist: newList, wipe, eq: eqSheet, timer: timerSheet, hideinstall: () => { save('noInstall', true); render(true); }, copylink: copyLink, diag: runDiag, diagcopy: copyDiag })[d.act]?.();
   });
   $('backBtn').addEventListener('click', () => { if (history.length > 1 && sessionHistory > 0) history.back(); else location.hash = '#/inicio'; });
   let sessionHistory = 0;
@@ -826,8 +835,52 @@
     try { await navigator.clipboard.writeText(url); toast('Enlace copiado. Pégalo en tu navegador.'); }
     catch (e) { toast(url, 6000); }
   }
-  window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvent = e; if (route.name === 'inicio' || route.name === 'ajustes') render(true); });
-  window.addEventListener('appinstalled', () => { installEvent = null; toast('Onda se instaló. Búscala en tus apps (puede tardar unos segundos en aparecer).', 6000); render(true); });
+  // Datos para el diagnóstico de instalación (Ajustes).
+  const diag = { bip: '', prompted: 'no', choice: '', installed: '', errors: [] };
+  window.addEventListener('error', (e) => { diag.errors.push(String(e.message || e.error || e).slice(0, 160)); });
+  window.addEventListener('unhandledrejection', (e) => { diag.errors.push('promesa: ' + String(e.reason && e.reason.message || e.reason).slice(0, 160)); });
+  async function runDiag() {
+    const out = $('diagOut'); if (!out) return;
+    out.innerHTML = '<li>Revisando…</li>';
+    const rows = [];
+    const row = (ok, label, detail) => rows.push({ ok, label, detail });
+    const uad = navigator.userAgentData;
+    row(null, 'Navegador', (uad && uad.brands ? uad.brands.map((b) => b.brand + ' ' + b.version).filter((x) => !/Not/i.test(x)).join(', ') + ' · ' : '') + navigator.userAgent);
+    row(isSecureContext, 'Conexión segura (https)', isSecureContext ? 'sí' : 'no');
+    row(isInstalled() ? true : null, 'Abierta como app instalada', isInstalled() ? 'sí' : 'no (estás en el navegador)');
+    if (!('serviceWorker' in navigator)) row(false, 'Service worker', 'este navegador no lo admite');
+    else {
+      let reg = null; try { reg = await navigator.serviceWorker.getRegistration(); } catch (e) { /* nada */ }
+      row(!!reg, 'Service worker registrado', reg ? (reg.active ? 'activo' : reg.installing ? 'instalándose' : 'en espera') + ' · ámbito ' + reg.scope : 'no');
+      row(!!navigator.serviceWorker.controller, 'La página está controlada por el service worker', navigator.serviceWorker.controller ? 'sí' : 'no (recarga la página una vez)');
+    }
+    const link = document.querySelector('link[rel="manifest"]');
+    try {
+      const r = await fetch(link.href, { cache: 'no-store' });
+      const m = await r.json();
+      row(r.ok, 'Archivo de instalación (manifest)', r.status + ' · ' + (r.headers.get('content-type') || '?') + ' · ' + m.short_name + ' · display ' + m.display);
+      for (const ic of m.icons || []) {
+        try {
+          const ir = await fetch(new URL(ic.src, link.href), { cache: 'no-store' });
+          const bmp = await createImageBitmap(await ir.blob());
+          row(ir.ok && bmp.width + 'x' + bmp.height === ic.sizes, 'Ícono ' + ic.sizes + ' (' + ic.purpose + ')', ir.status + ' · ' + bmp.width + 'x' + bmp.height);
+        } catch (e) { row(false, 'Ícono ' + ic.sizes, 'no se pudo cargar: ' + e.message); }
+      }
+    } catch (e) { row(false, 'Archivo de instalación (manifest)', 'no se pudo leer: ' + e.message); }
+    row(diag.bip ? true : null, 'Chrome ofreció instalar (beforeinstallprompt)', diag.bip || 'no, todavía');
+    row(null, 'Botón «Instalar» de la app', diag.prompted === 'sí' ? 'tocado · resultado: ' + (diag.choice || 'sin respuesta') : 'no tocado');
+    row(diag.installed ? true : null, 'Chrome confirmó la instalación (appinstalled)', diag.installed || 'no');
+    if (diag.errors.length) row(false, 'Errores de la página', diag.errors.slice(-5).join(' | '));
+    diag.last = rows;
+    out.innerHTML = rows.map((r) => `<li class="${r.ok === true ? 'ok' : r.ok === false ? 'bad' : ''}"><strong>${r.ok === true ? '✓' : r.ok === false ? '✗' : '•'} ${esc(r.label)}</strong><span>${esc(r.detail)}</span></li>`).join('');
+  }
+  async function copyDiag() {
+    if (!diag.last) await runDiag();
+    const txt = 'Diagnóstico Onda · ' + new Date().toISOString() + '\n' + location.href + '\n' + diag.last.map((r) => `${r.ok === true ? '✓' : r.ok === false ? '✗' : '•'} ${r.label}: ${r.detail}`).join('\n');
+    try { await navigator.clipboard.writeText(txt); toast('Informe copiado. Pégalo en el chat.'); } catch (e) { toast('No se pudo copiar: haz una captura de pantalla.'); }
+  }
+  window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvent = e; diag.bip = 'sí, ' + new Date().toLocaleTimeString('es'); if (route.name === 'inicio' || route.name === 'ajustes') render(true); });
+  window.addEventListener('appinstalled', () => { installEvent = null; diag.installed = 'sí, ' + new Date().toLocaleTimeString('es'); toast('Onda se instaló. Búscala en tus apps (puede tardar unos segundos en aparecer).', 6000); render(true); });
   if (!isNative && 'serviceWorker' in navigator && location.protocol.startsWith('http')) {
     window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
   }
