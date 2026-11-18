@@ -1,6 +1,6 @@
 /* Interfaz de Onda: vistas, listas, buscador, reproductor a pantalla completa y ajustes. */
 (function () {
-  const APP_VERSION = '1.6 (18-nov)';
+  const APP_VERSION = '1.7 (18-nov)';
   const DB = window.OndaDB, P = window.OndaPlayer, Tags = window.OndaTags, Demo = window.OndaDemo;
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -257,7 +257,8 @@
     const sorters = { titulo: byTitle, artista: (a, b) => coll.compare(a.artist, b.artist) || coll.compare(a.album, b.album) || (a.trackNo - b.trackNo) || byTitle(a, b), recientes: (a, b) => b.added - a.added };
     const tracks = all().filter((t) => hit(t.title + ' ' + t.artist + ' ' + t.album)).sort(sorters[sort] || byTitle);
     if (!tracks.length) return none;
-    return `<div class="list-head">${playBar('lib', tracks.length, tracks.reduce((s, t) => s + (t.duration || 0), 0))}
+    const dur = tracks.reduce((s, t) => s + (t.duration || 0), 0);
+    return `<div class="list-head"><span class="muted small">${plural(tracks.length, 'canción', 'canciones')}${dur ? ' · ' + fmtLong(dur) : ''}</span>
       <label class="sort"><span class="sr">Ordenar por</span><select id="sortSel">
         <option value="titulo"${sort === 'titulo' ? ' selected' : ''}>Por título</option>
         <option value="artista"${sort === 'artista' ? ' selected' : ''}>Por artista</option>
