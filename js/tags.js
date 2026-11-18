@@ -22,6 +22,18 @@
     return s.replace(/\u0000+$/g, '').split('\u0000')[0].trim();
   }
 
+  // Como decodeText, pero conserva los saltos de línea (para letras).
+  function decodeTextFull(enc, bytes) {
+    let s;
+    if (enc === 0) s = latin1.decode(bytes);
+    else if (enc === 3) s = utf8.decode(bytes);
+    else if (enc === 2) s = u16be.decode(bytes);
+    else if (bytes[0] === 0xfe && bytes[1] === 0xff) s = u16be.decode(bytes.subarray(2));
+    else if (bytes[0] === 0xff && bytes[1] === 0xfe) s = u16le.decode(bytes.subarray(2));
+    else s = u16le.decode(bytes);
+    return s.replace(/\u0000+$/g, '').replace(/\r\n?/g, '\n');
+  }
+
   // Posición tras el terminador nulo (1 byte en latin1/utf8, 2 bytes alineados en utf16).
   function skipString(enc, b, o) {
     if (enc === 1 || enc === 2) {
@@ -67,6 +79,12 @@
       }
       const key = { TIT2: 'title', TT2: 'title', TPE1: 'artist', TP1: 'artist', TALB: 'album', TAL: 'album', TRCK: 'track', TRK: 'track', TPE2: 'albumArtist', TP2: 'albumArtist' }[id];
       if (key && data.length > 1) { if (!tags[key]) tags[key] = decodeText(data[0], data.subarray(1)); continue; }
+      if ((id === 'USLT' || id === 'ULT') && !tags.lyrics && data.length > 5) {
+        const enc = data[0]; const p = skipString(enc, data, 4); // idioma (3) + descripción
+        const txt = decodeTextFull(enc, data.subarray(p));
+        if (txt.trim()) tags.lyrics = txt.trim();
+        continue;
+      }
       if ((id === 'APIC' || id === 'PIC') && !tags.cover && data.length > 8) {
         const enc = data[0]; let p = 1, mime;
         if (id === 'PIC') { const fmt = latin1.decode(data.subarray(1, 4)).toLowerCase(); mime = fmt === 'png' ? 'image/png' : 'image/jpeg'; p = 4; }
@@ -117,6 +135,7 @@
       album: (tags && tags.album) || 'Sin álbum',
       trackNo: isFinite(tn) ? tn : 0,
       cover: (tags && tags.cover) || null,
+      lyrics: (tags && tags.lyrics) || '',
       duration: await duration(file)
     };
   }

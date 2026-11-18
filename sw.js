@@ -1,10 +1,10 @@
 /* Guarda Onda en el teléfono para que abra sin internet. La música no pasa por aquí: vive en IndexedDB.
    Con internet siempre se pide la versión más nueva (y se guarda); sin internet se usa la guardada.
    Al cambiar archivos, sube VERSION y APP_VERSION (js/app.js). */
-const VERSION = 'onda-11';
+const VERSION = 'onda-12';
 const FILES = [
   './', 'index.html', 'app.css', 'manifest.webmanifest',
-  'js/db.js', 'js/tags.js', 'js/demo.js', 'js/player.js', 'js/online.js', 'js/app.js',
+  'js/db.js', 'js/tags.js', 'js/demo.js', 'js/player.js', 'js/online.js', 'js/lyrics.js', 'js/app.js',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png', 'icons/apple-touch-icon.png'
 ];
 

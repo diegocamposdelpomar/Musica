@@ -19,6 +19,9 @@ Está hecha en HTML, CSS y JavaScript puro, sin dependencias ni paso de compilac
 - **Listas** propias y la lista automática **Me gusta**.
 - **Reproductor** a pantalla completa: aleatorio, repetir (todo / una), cola editable, deslizar hacia abajo
   para cerrar y a los lados sobre la portada para cambiar de canción.
+- **Letras**: en el reproductor, desliza hacia arriba sobre la portada (o toca «Letra»). Se leen del propio MP3
+  o se buscan en LRCLIB (lrclib.net, libre y sin clave); las sincronizadas resaltan la línea que suena y al tocar
+  una línea la canción salta a ese momento. También se pueden escribir o pegar a mano (texto o formato LRC).
 - **Controles en la pantalla de bloqueo** y en los auriculares (Media Session API).
 - **Ecualizador** de 5 bandas con preajustes y visualizador (opcional: en iPhone puede cortar el sonido
   con la pantalla bloqueada).
@@ -52,5 +55,6 @@ python3 -m http.server 8000
 | `js/player.js` | Motor: cola, aleatorio, repetir, pantalla de bloqueo, ecualizador, temporizador |
 | `js/demo.js` | Composición de las canciones de muestra |
 | `js/online.js` | Búsqueda en internet: Audius, Internet Archive, Deezer, Apple Music, YouTube |
+| `js/lyrics.js` | Letras: búsqueda en LRCLIB y lectura del formato sincronizado LRC |
 | `js/app.js` | Interfaz: vistas, listas, buscador, hojas de opciones |
 | `sw.js` | Guarda la app para abrirla sin internet (sube `VERSION` al cambiar archivos) |

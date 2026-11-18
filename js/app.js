@@ -1,6 +1,6 @@
 /* Interfaz de Onda: vistas, listas, buscador, reproductor a pantalla completa y ajustes. */
 (function () {
-  const APP_VERSION = '1.5 (18-nov)';
+  const APP_VERSION = '1.6 (18-nov)';
   const DB = window.OndaDB, P = window.OndaPlayer, Tags = window.OndaTags, Demo = window.OndaDemo;
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -111,7 +111,7 @@
       if (seen.has(f.name + '|' + f.size)) { skipped++; continue; }
       try {
         const m = await Tags.read(f);
-        const meta = { id: uid(), title: m.title, artist: m.artist, album: m.album, trackNo: m.trackNo, duration: m.duration, cover: m.cover ? await shrinkCover(m.cover) : null, name: f.name, size: f.size, type: f.type, added: Date.now() + i, fav: false, plays: 0, lastPlayed: 0 };
+        const meta = { id: uid(), title: m.title, artist: m.artist, album: m.album, trackNo: m.trackNo, duration: m.duration, cover: m.cover ? await shrinkCover(m.cover) : null, lyrics: m.lyrics ? Object.assign(window.OndaLyrics.fromText(m.lyrics), { source: 'archivo' }) : null, name: f.name, size: f.size, type: f.type, added: Date.now() + i, fav: false, plays: 0, lastPlayed: 0 };
         await DB.addTrack(meta, f);
         lib.tracks.set(meta.id, meta); seen.add(f.name + '|' + f.size); added++;
       } catch (e) { failed++; }
@@ -467,6 +467,7 @@
       <section class="panel"><h2>Búsqueda en internet</h2>
         <p class="muted small">Elige dónde busca la pestaña Buscar.</p>
         <div class="checks">${Online.providers.map((p) => `<label class="check"><input type="checkbox" data-src="${p.id}" ${srcOn(p.id) ? 'checked' : ''}><span><strong>${p.name}</strong><small>${p.note}</small></span></label>`).join('')}</div>
+        <label class="check"><input type="checkbox" id="lyrWeb" ${lyricsWeb() ? 'checked' : ''}><span><strong>Letras de canciones (LRCLIB)</strong><small>Busca la letra por título y artista en lrclib.net, una base de letras libre</small></span></label>
         <h3 class="sub">Clave de YouTube (opcional)</h3>
         <p class="muted small">Con tu propia clave gratuita de YouTube verás los videos dentro de Onda. Cómo conseguirla: entra a console.cloud.google.com, crea un proyecto, activa «YouTube Data API v3» y en «Credenciales» crea una clave de API. Se guarda solo en este teléfono.</p>
         <form class="ask" id="ytForm"><input type="text" id="ytKey" value="${esc(ytKey())}" placeholder="Pega aquí tu clave" autocomplete="off" spellcheck="false" aria-label="Clave de YouTube"><button type="submit" class="btn">Guardar</button></form></section>
@@ -504,6 +505,7 @@
     if (lq) lq.addEventListener('input', () => { libQ = lq.value; ctxs = {}; $('libList').innerHTML = libList(libSub); bindSort(); });
     bindSort();
     view.querySelectorAll('[data-src]').forEach((c) => { c.onchange = () => { const o = load('sources') || {}; o[c.dataset.src] = c.checked; save('sources', o); web.q = ''; }; });
+    const lw = $('lyrWeb'); if (lw) lw.onchange = () => save('lyricsWeb', lw.checked);
     const yf = $('ytForm');
     if (yf) yf.onsubmit = (e) => { e.preventDefault(); save('ytKey', $('ytKey').value.trim()); web.q = ''; toast($('ytKey').value.trim() ? 'Clave de YouTube guardada' : 'Clave de YouTube borrada', 1800); };
     const quota = $('quota');
@@ -768,12 +770,13 @@
   function openNP() {
     if (!P.current()) return;
     np.hidden = false; requestAnimationFrame(() => np.classList.add('open'));
+    $('npHint').hidden = (load('lyrHint') || 0) >= 3;
     document.body.classList.add('np-on');
     pushLayer('np'); paintPlayer(); paintTime(); startViz();
     setTimeout(() => $('btnPlay').focus({ preventScroll: true }), 50);
   }
   function hideNP() {
-    np.classList.remove('open'); document.body.classList.remove('np-on'); stopViz();
+    np.classList.remove('open'); document.body.classList.remove('np-on'); stopViz(); closeLyrics(true);
     np.style.transform = '';
     setTimeout(() => { if (!np.classList.contains('open')) np.hidden = true; }, 260);
     $('miniOpen').focus({ preventScroll: true });
@@ -799,7 +802,7 @@
   (function swipe() {
     let x0 = 0, y0 = 0, dy = 0, dx = 0, active = false, onArt = false;
     np.addEventListener('touchstart', (e) => {
-      if (e.target.closest('input, .np-ctrl, .np-tools')) return;
+      if (e.target.closest('input, .np-ctrl, .np-tools, .lyr-scroll')) return;
       const p = e.touches[0]; x0 = p.clientX; y0 = p.clientY; dx = dy = 0; active = true; onArt = !!e.target.closest('.np-art');
     }, { passive: true });
     np.addEventListener('touchmove', (e) => {
@@ -809,7 +812,11 @@
     np.addEventListener('touchend', () => {
       if (!active) return; active = false; np.style.transition = '';
       if (dy > 110 && Math.abs(dy) > Math.abs(dx)) closeLayer();
-      else { np.style.transform = ''; if (onArt && Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.5) (dx < 0 ? P.next() : P.prev()); }
+      else {
+        np.style.transform = '';
+        if (onArt && Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.5) (dx < 0 ? P.next() : P.prev());
+        else if (onArt && dy < -60 && Math.abs(dy) > Math.abs(dx) * 1.2) openLyrics();
+      }
     });
   })();
 
@@ -865,7 +872,8 @@
     saveRemote();
   });
   P.ev.addEventListener('ended', () => { lastCounted = null; });
-  P.ev.addEventListener('time', paintTime);
+  P.ev.addEventListener('time', () => { paintTime(); syncLyrics(); });
+  P.ev.addEventListener('change', () => { if (lyrOn && P.currentId() !== lyrFor) loadLyrics(); });
   P.ev.addEventListener('missing', () => toast('No se encontró el audio de esta canción'));
   P.ev.addEventListener('error', () => {
     const t = P.current();
@@ -946,6 +954,117 @@
       body.addEventListener('input', (e) => { const r = e.target.closest('[data-band]'); if (!r) return; if (!EQ.on) { EQ.enable(); body.querySelector('#eqOn').checked = true; startViz(); } EQ.set(+r.dataset.band, +r.value); sync(); });
     });
   }
+
+  /* ---------- Letras ---------- */
+  const Lyr = window.OndaLyrics;
+  const lyrCache = new Map();
+  let lyrOn = false, lyrFor = null, lyrData = null, lyrActive = -1, lyrTouched = 0;
+  const lyricsWeb = () => load('lyricsWeb') !== false;
+  const lyrSc = $('lyrScroll');
+  async function lyricsFor(t, force) {
+    if (!force) {
+      if (t.lyrics) return t.lyrics;
+      if (lyrCache.has(t.id)) return lyrCache.get(t.id);
+    }
+    if (!lyricsWeb()) return { disabled: true };
+    const r = await Lyr.find(t);
+    lyrCache.set(t.id, r);
+    if (!t.remote && !r.notFound) { t.lyrics = r; DB.putTrack(t).catch(() => {}); }
+    return r;
+  }
+  function openLyrics() {
+    if (!P.current() || lyrOn) return;
+    lyrOn = true; np.classList.add('lyr'); $('npLyr').hidden = false;
+    $('btnLyrics').classList.add('on'); $('btnLyrics').setAttribute('aria-pressed', 'true');
+    save('lyrHint', (load('lyrHint') || 0) + 1); $('npHint').hidden = true;
+    stopViz(); loadLyrics();
+  }
+  function closeLyrics(silent) {
+    if (!lyrOn) return;
+    lyrOn = false; np.classList.remove('lyr'); $('npLyr').hidden = true;
+    $('btnLyrics').classList.remove('on'); $('btnLyrics').setAttribute('aria-pressed', 'false');
+    if (!silent) startViz();
+  }
+  const lyrMsg = (txt, btns = '') => `<div class="lyr-msg"><p>${txt}</p><div class="btns">${btns}</div></div>`;
+  const btnRetry = '<button type="button" class="btn btn-sm" data-lyr="retry">Buscar de nuevo</button>';
+  const btnWrite = '<button type="button" class="btn btn-sm" data-lyr="edit">Escribir o pegar la letra</button>';
+  async function loadLyrics(force) {
+    const t = P.current(); if (!t) return;
+    lyrFor = t.id; lyrActive = -1; lyrData = null;
+    $('lyrCover').innerHTML = coverHTML(t, 'cover-xs');
+    $('lyrSrc').innerHTML = `<strong>${esc(t.title)}</strong><span>${esc(t.artist)}</span>`;
+    lyrSc.classList.remove('sync'); lyrSc.scrollTop = 0;
+    lyrSc.innerHTML = lyrMsg('<span class="spin"></span>Buscando la letra…');
+    let r;
+    try { r = await lyricsFor(t, force); }
+    catch (e) {
+      if (lyrFor !== t.id) return;
+      lyrSc.innerHTML = lyrMsg(navigator.onLine === false ? 'Sin conexión: la letra se buscará cuando tengas internet.' : `No se pudo buscar la letra (${esc(e.message)}).`, btnRetry + btnWrite);
+      return;
+    }
+    if (lyrFor !== t.id) return;
+    lyrData = r; renderLyrics();
+  }
+  function renderLyrics() {
+    const r = lyrData; if (!r) return;
+    lyrSc.classList.toggle('sync', !!r.synced);
+    if (r.disabled) { lyrSc.innerHTML = lyrMsg('La búsqueda de letras en internet está desactivada en Ajustes.', btnWrite); return; }
+    if (r.instrumental) { lyrSc.innerHTML = lyrMsg('Esta canción es instrumental: no tiene letra.', btnWrite); return; }
+    if (r.notFound) { lyrSc.innerHTML = lyrMsg('No encontramos la letra de esta canción.', btnRetry + btnWrite); return; }
+    const src = { LRCLIB: 'LRCLIB', archivo: 'guardada en el archivo', manual: 'escrita por ti' }[r.source] || r.source;
+    const foot = `<p class="lyr-foot">Letra: ${esc(src)}${r.synced ? ' · sincronizada: toca una línea para ir a ese momento' : ''}</p>`;
+    if (r.synced) lyrSc.innerHTML = r.synced.map((l, i) => `<p class="ln${l.text ? '' : ' gap'}" data-i="${i}">${l.text ? esc(l.text) : '♪'}</p>`).join('') + foot;
+    else lyrSc.innerHTML = `<div class="lyr-plain">${esc(r.plain)}</div>` + foot;
+    syncLyrics(true);
+  }
+  function syncLyrics(jump) {
+    if (!lyrOn || !lyrData || !lyrData.synced) return;
+    const lines = lyrData.synced, tm = P.audio.currentTime + 0.3;
+    let i = -1; for (let k = 0; k < lines.length && lines[k].t <= tm; k++) i = k;
+    if (i === lyrActive && !jump) return;
+    lyrActive = i;
+    const els = lyrSc.querySelectorAll('.ln');
+    els.forEach((el, k) => { el.classList.toggle('on', k === i); el.classList.toggle('past', k < i); });
+    const el = els[Math.max(i, 0)];
+    if (el && Date.now() - lyrTouched > 3500) lyrSc.scrollTo({ top: el.offsetTop - lyrSc.clientHeight * 0.4, behavior: jump || matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+  }
+  ['touchstart', 'wheel', 'pointerdown'].forEach((ev) => lyrSc.addEventListener(ev, () => { lyrTouched = Date.now(); }, { passive: true }));
+  lyrSc.addEventListener('click', (e) => {
+    const ln = e.target.closest('.ln');
+    if (ln && lyrData && lyrData.synced) { lyrTouched = 0; P.audio.currentTime = lyrData.synced[+ln.dataset.i].t; if (P.audio.paused) P.play(); syncLyrics(true); return; }
+    const b = e.target.closest('[data-lyr]');
+    if (b && b.dataset.lyr === 'retry') loadLyrics(true);
+    if (b && b.dataset.lyr === 'edit') editLyrics();
+  });
+  function editLyrics() {
+    const t = P.current(); if (!t) return;
+    const cur = (lyrData && (lyrData.raw || lyrData.plain)) || '';
+    openSheet('Letra de ' + t.title, `<form class="ask ask-col" id="lyrForm"><textarea id="lyrText" rows="10" placeholder="Pega aquí la letra. Si tiene tiempos como [01:23.45] se mostrará sincronizada." aria-label="Letra">${esc(cur)}</textarea><button type="submit" class="btn btn-go">Guardar letra</button></form>`, (body) => {
+      body.querySelector('form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const r = Lyr.fromText($('lyrText').value);
+        if (!t.remote) { t.lyrics = r; await DB.putTrack(t); }
+        lyrCache.set(t.id, r || { notFound: true });
+        closeSheet(); toast(r ? 'Letra guardada' : 'Letra borrada', 1500);
+        if (lyrOn && lyrFor === t.id) { lyrData = r || { notFound: true }; renderLyrics(); }
+      });
+    });
+  }
+  $('lyrMore').addEventListener('click', () => {
+    const t = P.current(); if (!t) return;
+    openSheet('Letra', menu([
+      lyricsWeb() && { id: 'retry', icon: 'search', label: 'Buscar de nuevo en internet' },
+      { id: 'edit', icon: 'edit', label: lyrData && (lyrData.plain || lyrData.synced) ? 'Corregir la letra' : 'Escribir o pegar la letra' },
+      !t.remote && t.lyrics && { id: 'del', icon: 'trash', label: 'Quitar la letra guardada', danger: true }
+    ]), onMenu({
+      retry: () => { closeSheet(); loadLyrics(true); },
+      edit: () => editLyrics(),
+      del: async () => { delete t.lyrics; await DB.putTrack(t); lyrCache.delete(t.id); closeSheet(); toast('Letra quitada', 1500); loadLyrics(); }
+    }));
+  });
+  $('lyrClose').addEventListener('click', () => closeLyrics());
+  $('btnLyrics').addEventListener('click', () => (lyrOn ? closeLyrics() : openLyrics()));
+  $('npHint').addEventListener('click', openLyrics);
 
   /* ---------- Visualizador (solo con el ecualizador activo) ---------- */
   let vizRaf = 0;
