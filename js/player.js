@@ -47,12 +47,21 @@
     const id = cur(); const t = getTrack(id);
     if (!t) return;
     emit('change');
-    const blob = await DB.getFile(id);
-    if (token !== loadToken) return; // otra canción se pidió mientras tanto
-    if (!blob) { emit('missing'); return; }
-    if (url) URL.revokeObjectURL(url);
-    url = URL.createObjectURL(blob);
-    audio.src = url;
+    if (t.remote) {
+      // Canción de internet: se escucha por streaming, sin guardarla.
+      if (url) { URL.revokeObjectURL(url); url = null; }
+      // Con el ecualizador montado, el audio de otra web solo suena si permite CORS.
+      if (EQ.ctx) audio.crossOrigin = 'anonymous'; else audio.removeAttribute('crossorigin');
+      audio.src = t.url;
+    } else {
+      const blob = await DB.getFile(id);
+      if (token !== loadToken) return; // otra canción se pidió mientras tanto
+      if (!blob) { emit('missing'); return; }
+      if (url) URL.revokeObjectURL(url);
+      url = URL.createObjectURL(blob);
+      audio.removeAttribute('crossorigin');
+      audio.src = url;
+    }
     if (startAt) {
       const seek = () => { audio.removeEventListener('loadedmetadata', seek); try { audio.currentTime = startAt; } catch (e) { /* ignorar */ } };
       audio.addEventListener('loadedmetadata', seek);

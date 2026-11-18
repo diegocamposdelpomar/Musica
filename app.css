@@ -167,6 +167,35 @@ body.has-mini #view { padding-bottom: calc(var(--tabs-h) + var(--mini-h) + var(-
 .panel p { margin: 0 0 10px; }
 .panel .seg { margin: 0; }
 
+/* Buscar en internet */
+.search-sm { margin: 2px 0 8px; }
+.search-sm input { height: 42px; }
+.search-sm .search-ico { top: 9px; }
+.src-list { list-style: none; margin: 6px 0 10px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.src-list li { display: flex; flex-direction: column; padding: 10px 12px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); }
+.src-list span { font-size: .85rem; color: var(--muted); }
+.src-list a, .src p a, .panel a { color: var(--accent); }
+.sec-web { margin-top: 30px; }
+.chips.ext { margin-bottom: 4px; }
+.chips.ext .chip { font-size: .82rem; padding: 6px 12px; }
+.src { margin-top: 18px; }
+.src-h { font-size: 1rem; margin: 0 0 6px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.src-h small { font: 500 .78rem var(--font); color: var(--muted); }
+.spin { display: inline-block; width: 14px; height: 14px; margin-right: 8px; vertical-align: -2px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--accent); animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.card-btn { background: none; border: 0; padding: 0; text-align: left; cursor: pointer; color: inherit; font: inherit; }
+.hscroll .card-wide { width: 220px; }
+.cover-video { width: 220px; height: 124px; border-radius: 10px; font-size: 2.4rem; }
+.yt { position: relative; width: 100%; aspect-ratio: 16 / 9; border-radius: 12px; overflow: hidden; background: #000; margin: 4px 0 8px; }
+.yt iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+#iaBody .btns { margin: 4px 0 8px; }
+.checks { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+.check { display: flex; align-items: center; gap: 12px; min-height: 48px; cursor: pointer; }
+.check input { width: 22px; height: 22px; accent-color: var(--accent); flex: none; }
+.check span { display: flex; flex-direction: column; }
+.check small { color: var(--muted); font-size: .8rem; }
+.panel .sub { font-size: .95rem; margin: 6px 0 6px; }
+
 /* Diagnóstico */
 .diag { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: .85rem; }
 .diag li { display: flex; flex-direction: column; padding: 8px 10px; border-radius: 10px; background: var(--surface2); overflow-wrap: anywhere; }

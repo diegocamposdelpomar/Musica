@@ -23,7 +23,15 @@
 
   /* ---------- Biblioteca en memoria ---------- */
   const lib = { tracks: new Map(), playlists: [] };
-  const get = (id) => lib.tracks.get(id);
+  // Canciones de internet (Audius, Archive, avances…): viven en memoria; se recuerdan las que están en la cola.
+  const remote = new Map();
+  try { (JSON.parse(localStorage.getItem('onda-remote') || '[]') || []).forEach((t) => remote.set(t.id, t)); } catch (e) { /* nada */ }
+  function saveRemote() {
+    const keep = new Set([...P.S.queue, ...P.S.source]);
+    try { localStorage.setItem('onda-remote', JSON.stringify([...remote.values()].filter((t) => keep.has(t.id)))); } catch (e) { /* nada */ }
+  }
+  const get = (id) => lib.tracks.get(id) || remote.get(id);
+  const SRC = { audius: 'Audius', archive: 'Internet Archive', deezer: 'Deezer', itunes: 'Apple Music', youtube: 'YouTube' };
   const all = () => [...lib.tracks.values()];
   const byTitle = (a, b) => coll.compare(a.title, b.title);
   const albumKey = (t) => t.album + '\u0001' + t.artist;
@@ -43,6 +51,7 @@
   /* ---------- Portadas ---------- */
   const coverUrls = new Map();
   function coverUrl(t) {
+    if (t && t.coverUrl) return t.coverUrl;
     if (!t || !t.cover) return null;
     if (!coverUrls.has(t.id)) coverUrls.set(t.id, URL.createObjectURL(t.cover));
     return coverUrls.get(t.id);
@@ -50,7 +59,7 @@
   function hue(str) { let h = 0; for (const c of String(str)) h = (h * 31 + c.codePointAt(0)) >>> 0; return h % 360; }
   function coverHTML(t, cls = '', label = '') {
     const u = coverUrl(t);
-    if (u) return `<span class="cover ${cls}"><img src="${u}" alt="" loading="lazy" decoding="async"></span>`;
+    if (u) return `<span class="cover ${cls}"><img src="${esc(u)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.remove()"></span>`;
     const seed = t ? t.album + t.artist : label; const h = hue(seed);
     const letter = (t ? (t.album !== 'Sin álbum' ? t.album : t.title) : label || '♪').trim().charAt(0).toUpperCase();
     return `<span class="cover cover-gen ${cls}" style="--h1:${h};--h2:${(h + 50) % 360}"><b>${esc(letter)}</b></span>`;
@@ -58,7 +67,7 @@
   const artCache = new Map();
   async function artFor(t) { // imagen para la pantalla de bloqueo
     if (!t) return null;
-    if (t.cover) return coverUrl(t);
+    if (t.cover || t.coverUrl) return coverUrl(t);
     const k = albumKey(t);
     if (artCache.has(k)) return artCache.get(k);
     const c = document.createElement('canvas'); c.width = c.height = 512; const g = c.getContext('2d');
@@ -145,7 +154,7 @@
       <li class="row${t.id === curId ? ' is-cur' : ''}" data-id="${t.id}">
         <button type="button" class="row-main" data-ctx="${key}" data-i="${i}">
           ${opts.numbers ? `<span class="row-num">${t.id === curId ? '<span class="eqbars"><i></i><i></i><i></i></span>' : (t.trackNo || i + 1)}</span>` : coverHTML(t, 'cover-sm')}
-          <span class="row-txt"><strong>${esc(t.title)}</strong><span>${t.fav ? `<svg class="tiny-heart" aria-label="Me gusta"><use href="#i-heart-on"/></svg>` : ''}${esc(opts.noArtist ? fmtTime(t.duration) : t.artist + ' · ' + fmtTime(t.duration))}</span></span>
+          <span class="row-txt"><strong>${esc(t.title)}</strong><span>${t.fav ? `<svg class="tiny-heart" aria-label="Me gusta"><use href="#i-heart-on"/></svg>` : ''}${esc(opts.noArtist ? fmtTime(t.duration) : t.artist + ' · ' + (t.remote ? SRC[t.source] + (t.preview ? ' · avance 30 s' : t.duration ? ' · ' + fmtTime(t.duration) : '') : fmtTime(t.duration)))}</span></span>
           ${!opts.numbers && t.id === curId ? '<span class="eqbars"><i></i><i></i><i></i></span>' : ''}
         </button>
         <button type="button" class="icon-btn" data-more="${t.id}" data-pl="${opts.playlist || ''}" data-pi="${i}" aria-label="Opciones de ${esc(t.title)}">${icon('more')}</button>
@@ -218,17 +227,30 @@
     setBar('Biblioteca', { actions: addBtn + gearBtn });
     if (!lib.tracks.size) return emptyLibrary();
     const seg = `<div class="seg" role="tablist">${LIB_TABS.map(([k, l]) => `<a role="tab" href="#/biblioteca/${k}" aria-selected="${k === sub}">${l}</a>`).join('')}</div>`;
+    const ph = { canciones: 'Buscar en tus canciones', artistas: 'Buscar artistas', albumes: 'Buscar álbumes' }[sub];
+    libSub = sub;
+    return seg + `<div class="search search-sm"><span class="search-ico">${icon('search')}</span><input type="search" id="libQ" placeholder="${ph}" autocomplete="off" enterkeyhint="search" value="${esc(libQ)}" aria-label="${ph}"></div><div id="libList">${libList(sub)}</div>`;
+  }
+  let libQ = '', libSub = 'canciones';
+  const matcher = (q) => { const words = norm(q.trim()).split(/\s+/).filter(Boolean); return (s) => words.every((w) => norm(s).includes(w)); };
+  function libList(sub) {
+    const hit = matcher(libQ); const none = `<p class="muted center">Nada coincide con «${esc(libQ.trim())}».</p>`;
     if (sub === 'artistas') {
-      return seg + `<ul class="rows">${artists().map((a) => `<li class="row"><a class="row-main" href="#/artista/${encodeURIComponent(a.name)}">
+      const as = artists().filter((a) => hit(a.name));
+      if (!as.length) return none;
+      return `<ul class="rows">${as.map((a) => `<li class="row"><a class="row-main" href="#/artista/${encodeURIComponent(a.name)}">
         ${coverHTML(null, 'cover-sm round', a.name)}<span class="row-txt"><strong>${esc(a.name)}</strong><span>${plural(a.albums.size, 'álbum', 'álbumes')} · ${plural(a.tracks.length, 'canción', 'canciones')}</span></span></a></li>`).join('')}</ul>`;
     }
     if (sub === 'albumes') {
-      return seg + `<div class="grid">${albums().map((a) => `<a class="card" href="#/album/${encodeURIComponent(a.key)}">${coverHTML(a.cover, 'cover-fill')}<strong>${esc(a.name)}</strong><span>${esc(a.artist)}</span></a>`).join('')}</div>`;
+      const als = albums().filter((a) => hit(a.name + ' ' + a.artist));
+      if (!als.length) return none;
+      return `<div class="grid">${als.map((a) => `<a class="card" href="#/album/${encodeURIComponent(a.key)}">${coverHTML(a.cover, 'cover-fill')}<strong>${esc(a.name)}</strong><span>${esc(a.artist)}</span></a>`).join('')}</div>`;
     }
     const sort = load('sort') || 'titulo';
     const sorters = { titulo: byTitle, artista: (a, b) => coll.compare(a.artist, b.artist) || coll.compare(a.album, b.album) || (a.trackNo - b.trackNo) || byTitle(a, b), recientes: (a, b) => b.added - a.added };
-    const tracks = all().sort(sorters[sort] || byTitle);
-    return seg + `<div class="list-head">${playBar('lib', tracks.length, tracks.reduce((s, t) => s + (t.duration || 0), 0))}
+    const tracks = all().filter((t) => hit(t.title + ' ' + t.artist + ' ' + t.album)).sort(sorters[sort] || byTitle);
+    if (!tracks.length) return none;
+    return `<div class="list-head">${playBar('lib', tracks.length, tracks.reduce((s, t) => s + (t.duration || 0), 0))}
       <label class="sort"><span class="sr">Ordenar por</span><select id="sortSel">
         <option value="titulo"${sort === 'titulo' ? ' selected' : ''}>Por título</option>
         <option value="artista"${sort === 'artista' ? ' selected' : ''}>Por artista</option>
@@ -290,29 +312,136 @@
     return head + playBar('pl', tracks.length, tracks.reduce((s, t) => s + (t.duration || 0), 0)) + trackRows(tracks, 'pl', p.name, { playlist: p.id });
   }
 
+  /* ---------- Buscar: en tu biblioteca y en internet ---------- */
+  const Online = window.OndaOnline;
   let searchQ = '';
+  const web = { q: '', data: {}, err: {}, busy: {}, token: 0 };
+  const srcOn = (id) => { const o = load('sources') || {}; return o[id] !== false; };
+  const ytKey = () => (load('ytKey') || '').trim();
   function vBuscar() {
     setBar('Buscar');
-    return `<div class="search"><span class="search-ico">${icon('search')}</span><input type="search" id="q" placeholder="Canciones, artistas, álbumes o listas" autocomplete="off" enterkeyhint="search" value="${esc(searchQ)}" aria-label="Buscar"></div><div id="results">${results()}</div>`;
+    return `<form class="search" id="qForm" role="search"><span class="search-ico">${icon('search')}</span><input type="search" id="q" placeholder="Canciones, artistas, álbumes…" autocomplete="off" enterkeyhint="search" value="${esc(searchQ)}" aria-label="Buscar música"></form>
+      <div id="results">${results()}</div>`;
   }
   function results() {
-    const q = norm(searchQ.trim());
-    if (!lib.tracks.size) return '<p class="muted center">Aún no hay canciones en tu biblioteca.</p>';
+    const q = searchQ.trim();
     if (!q) {
       const as = artists().slice(0, 12);
-      return `<h2 class="sec">Artistas</h2><div class="chips">${as.map((a) => `<a class="chip" href="#/artista/${encodeURIComponent(a.name)}">${esc(a.name)}</a>`).join('')}</div>`;
+      return `<p class="muted">Busca en tu biblioteca y en internet a la vez:</p>
+        <ul class="src-list">${Online.providers.map((p) => `<li><strong>${p.name}</strong><span>${p.note}${p.needsKey && !ytKey() ? ' · <a href="#/ajustes">añadir clave</a>' : ''}</span></li>`).join('')}
+        <li><strong>Spotify, SoundCloud, YouTube Music…</strong><span>Se abre su app con tu búsqueda (no dejan reproducir en otras apps)</span></li></ul>
+        ${as.length ? `<h2 class="sec">Tus artistas</h2><div class="chips">${as.map((a) => `<a class="chip" href="#/artista/${encodeURIComponent(a.name)}">${esc(a.name)}</a>`).join('')}</div>` : ''}`;
     }
-    const words = q.split(/\s+/);
-    const hit = (s) => words.every((w) => norm(s).includes(w));
-    const tracks = all().filter((t) => hit(t.title + ' ' + t.artist + ' ' + t.album)).sort(byTitle).slice(0, 60);
+    return libResults(q) + `<h2 class="sec sec-web">En internet</h2>
+      <div class="chips ext">${Online.external.map((e) => `<a class="chip" href="${esc(e.url(q))}" target="_blank" rel="noopener">${esc(e.name)} ↗</a>`).join('')}</div>
+      ${Online.providers.filter((p) => srcOn(p.id)).map((p) => `<section class="src" id="src-${p.id}">${srcBlock(p)}</section>`).join('')}
+      <p class="muted small center">Las fuentes se eligen en <a href="#/ajustes">Ajustes</a>.</p>`;
+  }
+  function libResults(q) {
+    if (!lib.tracks.size) return '';
+    const hit = matcher(q);
+    const tracks = all().filter((t) => hit(t.title + ' ' + t.artist + ' ' + t.album)).sort(byTitle).slice(0, 30);
     const as = artists().filter((a) => hit(a.name)).slice(0, 8);
     const als = albums().filter((a) => hit(a.name + ' ' + a.artist) && a.name !== 'Sin álbum').slice(0, 10);
     const pls = lib.playlists.filter((p) => hit(p.name));
-    if (!tracks.length && !as.length && !als.length && !pls.length) return `<p class="muted center">Nada coincide con «${esc(searchQ.trim())}».</p>`;
-    return (as.length ? `<h2 class="sec">Artistas</h2><div class="chips">${as.map((a) => `<a class="chip" href="#/artista/${encodeURIComponent(a.name)}">${icon('person')}${esc(a.name)}</a>`).join('')}</div>` : '')
-      + (als.length ? `<h2 class="sec">Álbumes</h2><div class="hscroll">${als.map((a) => `<a class="card" href="#/album/${encodeURIComponent(a.key)}">${coverHTML(a.cover, 'cover-md')}<strong>${esc(a.name)}</strong><span>${esc(a.artist)}</span></a>`).join('')}</div>` : '')
-      + (pls.length ? `<h2 class="sec">Listas</h2><div class="chips">${pls.map((p) => `<a class="chip" href="#/lista/${p.id}">${icon('lists')}${esc(p.name)}</a>`).join('')}</div>` : '')
-      + (tracks.length ? `<h2 class="sec">Canciones</h2>${trackRows(tracks, 'search', 'Búsqueda')}` : '');
+    if (!tracks.length && !as.length && !als.length && !pls.length) return `<p class="muted small">En tu biblioteca no hay nada con «${esc(q)}».</p>`;
+    return `<h2 class="sec">En tu biblioteca</h2>`
+      + (as.length ? `<div class="chips">${as.map((a) => `<a class="chip" href="#/artista/${encodeURIComponent(a.name)}">${icon('person')}${esc(a.name)}</a>`).join('')}</div>` : '')
+      + (als.length ? `<div class="hscroll">${als.map((a) => `<a class="card" href="#/album/${encodeURIComponent(a.key)}">${coverHTML(a.cover, 'cover-md')}<strong>${esc(a.name)}</strong><span>${esc(a.artist)}</span></a>`).join('')}</div>` : '')
+      + (pls.length ? `<div class="chips">${pls.map((p) => `<a class="chip" href="#/lista/${p.id}">${icon('lists')}${esc(p.name)}</a>`).join('')}</div>` : '')
+      + (tracks.length ? trackRows(tracks, 'search', 'Búsqueda') : '');
+  }
+  function srcBlock(p) {
+    const q = searchQ.trim();
+    const head = `<h3 class="src-h">${p.name}<small>${p.note}</small></h3>`;
+    if (p.needsKey && !ytKey()) {
+      const yt = Online.external.find((e) => e.id === 'youtube');
+      return head + `<p class="muted small">Para ver resultados de YouTube aquí, añade tu clave gratuita en <a href="#/ajustes">Ajustes</a>. Mientras tanto: <a href="${esc(yt.url(q))}" target="_blank" rel="noopener">buscar «${esc(q)}» en YouTube ↗</a></p>`;
+    }
+    if (web.q !== q || web.busy[p.id]) return head + `<p class="muted small"><span class="spin"></span>Buscando…</p>`;
+    if (web.err[p.id]) return head + `<p class="muted small">No respondió (${esc(web.err[p.id])}). <button type="button" class="linkish" data-retry="${p.id}">Reintentar</button></p>`;
+    const items = web.data[p.id] || [];
+    if (!items.length) return head + `<p class="muted small">Sin resultados.</p>`;
+    items.forEach((t) => remote.set(t.id, Object.assign(t, { remote: true })));
+    if (items[0].kind === 'album') return head + `<div class="hscroll">${items.map((a) => `<button type="button" class="card card-btn" data-iaalbum="${esc(a.id)}">${coverHTML(a, 'cover-md')}<strong>${esc(a.title)}</strong><span>${esc(a.artist)}${a.year ? ' · ' + esc(a.year) : ''}</span></button>`).join('')}</div>`;
+    if (items[0].kind === 'video') return head + `<div class="hscroll">${items.map((v) => `<button type="button" class="card card-btn card-wide" data-ytvideo="${esc(v.id)}">${coverHTML(v, 'cover-video')}<strong>${esc(v.title)}</strong><span>${esc(v.artist)}</span></button>`).join('')}</div>`;
+    return head + trackRows(items, 'web-' + p.id, p.name + ' · ' + q);
+  }
+  function paintSrc(id) { const el = $('src-' + id); if (el && route.name === 'buscar') el.innerHTML = srcBlock(Online.byId[id]); }
+  async function searchWeb(force) {
+    const q = searchQ.trim();
+    if (q.length < 2 || (!force && web.q === q)) return;
+    const token = ++web.token;
+    web.q = q; web.data = {}; web.err = {}; web.busy = {};
+    const list = Online.providers.filter((p) => srcOn(p.id) && !(p.needsKey && !ytKey()));
+    list.forEach((p) => { web.busy[p.id] = true; });
+    list.forEach((p) => paintSrc(p.id));
+    await Promise.all(list.map(async (p) => {
+      try { const r = await p.search(q, ytKey()); if (token !== web.token) return; web.data[p.id] = r; }
+      catch (e) { if (token !== web.token) return; web.err[p.id] = e.message || 'error'; }
+      web.busy[p.id] = false; paintSrc(p.id);
+    }));
+  }
+  async function retrySrc(id) {
+    const p = Online.byId[id]; const q = web.q; web.busy[id] = true; web.err[id] = ''; paintSrc(id);
+    try { web.data[id] = await p.search(q, ytKey()); } catch (e) { web.err[id] = e.message || 'error'; }
+    web.busy[id] = false; paintSrc(id);
+  }
+  let searchT = 0;
+  function onSearchInput() {
+    searchQ = $('q').value; ctxs = {};
+    const lr = $('results');
+    if (!searchQ.trim()) { lr.innerHTML = results(); return; }
+    if (!lr.querySelector('.sec-web')) lr.innerHTML = results();
+    else { // solo se repinta la parte de la biblioteca; la de internet espera a que dejes de escribir
+      const web0 = lr.querySelector('.sec-web');
+      while (web0.previousSibling) web0.previousSibling.remove();
+      web0.insertAdjacentHTML('beforebegin', libResults(searchQ.trim()));
+      lr.querySelectorAll('.chips.ext a').forEach((a, i) => { a.href = Online.external[i].url(searchQ.trim()); });
+    }
+    clearTimeout(searchT); searchT = setTimeout(() => searchWeb(), 700);
+  }
+
+  // Álbumes y conciertos de Internet Archive.
+  async function iaAlbum(id) {
+    const a = remote.get(id); if (!a) return;
+    openSheet(a.title, `<div class="sheet-track">${coverHTML(a, 'cover-sm')}<span class="row-txt"><strong>${esc(a.title)}</strong><span>${esc(a.artist)} · Internet Archive</span></span></div><div id="iaBody"><p class="muted"><span class="spin"></span>Cargando canciones…</p></div>`);
+    let tracks;
+    try { tracks = await Online.archive.tracks(a); } catch (e) { const b = $('iaBody'); if (b) b.innerHTML = `<p class="muted">No se pudieron cargar las canciones (${esc(e.message)}).</p>`; return; }
+    const body = $('iaBody'); if (!body) return;
+    if (!tracks.length) { body.innerHTML = `<p class="muted">Este elemento no tiene canciones en MP3. <a href="${esc(a.link)}" target="_blank" rel="noopener">Ver en Internet Archive ↗</a></p>`; return; }
+    tracks.forEach((t) => remote.set(t.id, Object.assign(t, { remote: true })));
+    body.innerHTML = `<div class="btns"><button type="button" class="btn btn-go btn-sm" data-playall="ia">${icon('play')}Reproducir</button><button type="button" class="btn btn-sm" data-iasave="${esc(id)}">Guardar sin conexión</button><a class="btn btn-sm" href="${esc(a.link)}" target="_blank" rel="noopener">Ver en Archive ↗</a></div>`
+      + trackRows(tracks, 'ia', a.title, { numbers: true });
+    body.dataset.ids = JSON.stringify(tracks.map((t) => t.id));
+  }
+  async function saveOffline(t, quiet) {
+    if (all().some((x) => x.originUrl === t.url)) { if (!quiet) toast('Ya estaba en tu biblioteca', 1500); return false; }
+    const r = await fetch(t.url);
+    if (!r.ok) throw new Error('respuesta ' + r.status);
+    const blob = await r.blob();
+    let cover = null;
+    if (t.coverUrl) { try { const c = await fetch(t.coverUrl); if (c.ok) cover = await shrinkCover(await c.blob()); } catch (e) { /* sin portada */ } }
+    const meta = { id: uid(), title: t.title, artist: t.artist || 'Artista desconocido', album: t.album || 'Sin álbum', trackNo: t.trackNo || 0, duration: t.duration || await Tags.read(new File([blob], 'a.mp3')).then((m) => m.duration).catch(() => 0), cover, name: t.title + '.mp3', size: blob.size, type: blob.type || 'audio/mpeg', added: Date.now(), fav: false, plays: 0, lastPlayed: 0, originUrl: t.url, originLink: t.link };
+    await DB.addTrack(meta, blob); lib.tracks.set(meta.id, meta);
+    return true;
+  }
+  async function saveMany(ids) {
+    let ok = 0, fail = 0;
+    for (let i = 0; i < ids.length; i++) {
+      toast(`Guardando ${i + 1} de ${ids.length}…`, 60000);
+      try { if (await saveOffline(remote.get(ids[i]), true)) ok++; } catch (e) { fail++; }
+    }
+    toast(`${plural(ok, 'canción guardada', 'canciones guardadas')} en tu biblioteca${fail ? ` · ${fail} no se pudieron descargar` : ''}`, 3500);
+    if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+  }
+
+  // Videos de YouTube: se ven dentro de la app (no suenan con la pantalla apagada: así lo exige YouTube).
+  function ytVideo(id) {
+    const v = remote.get(id); if (!v) return;
+    P.pause();
+    openSheet(v.title, `<div class="yt"><iframe src="https://www.youtube-nocookie.com/embed/${esc(v.videoId)}?autoplay=1&playsinline=1&rel=0" title="${esc(v.title)}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></div>
+      <p class="muted small">${esc(v.artist)}</p><div class="btns"><a class="btn btn-sm" href="${esc(v.link)}" target="_blank" rel="noopener">Abrir en YouTube ↗</a></div>`);
   }
 
   function vAjustes() {
@@ -328,6 +457,12 @@
         <button type="button" class="btn" data-act="demos">Añadir canciones de muestra</button></div></section>
       <section class="panel"><h2>Sonido</h2>
         <div class="btns"><button type="button" class="btn" data-act="eq">${icon('eq')}Ecualizador</button><button type="button" class="btn" data-act="timer">${icon('timer')}Temporizador</button></div></section>
+      <section class="panel"><h2>Búsqueda en internet</h2>
+        <p class="muted small">Elige dónde busca la pestaña Buscar.</p>
+        <div class="checks">${Online.providers.map((p) => `<label class="check"><input type="checkbox" data-src="${p.id}" ${srcOn(p.id) ? 'checked' : ''}><span><strong>${p.name}</strong><small>${p.note}</small></span></label>`).join('')}</div>
+        <h3 class="sub">Clave de YouTube (opcional)</h3>
+        <p class="muted small">Con tu propia clave gratuita de YouTube verás los videos dentro de Onda. Cómo conseguirla: entra a console.cloud.google.com, crea un proyecto, activa «YouTube Data API v3» y en «Credenciales» crea una clave de API. Se guarda solo en este teléfono.</p>
+        <form class="ask" id="ytForm"><input type="text" id="ytKey" value="${esc(ytKey())}" placeholder="Pega aquí tu clave" autocomplete="off" spellcheck="false" aria-label="Clave de YouTube"><button type="submit" class="btn">Guardar</button></form></section>
       <section class="panel"><h2>Instalar en el celular</h2>${installCard(true)}</section>
       <section class="panel"><h2>Diagnóstico de instalación</h2>
         <p class="muted small">Si no logras instalar Onda, toca «Revisar» y envía una captura de este recuadro.</p>
@@ -335,7 +470,7 @@
         <ul class="diag" id="diagOut"></ul></section>
       <section class="panel danger"><h2>Borrar</h2><p class="muted small">Elimina todas las canciones y listas guardadas en la app. Los archivos originales de tu teléfono no se tocan.</p>
         <button type="button" class="btn btn-bad" data-act="wipe">${icon('trash')}Borrar toda la biblioteca</button></section>
-      <p class="muted small center">Onda funciona sin internet y no envía tu música a ningún sitio: todo queda en este dispositivo.</p>`;
+      <p class="muted small center">Tu música guardada funciona sin internet y no se envía a ningún sitio. Solo la pestaña Buscar se conecta a los servicios que elijas, con lo que escribas.</p>`;
   }
   const notFound = (msg) => `<p class="muted center">${esc(msg)}</p><button type="button" class="btn btn-wide" data-go="#/inicio">Ir al inicio</button>`;
 
@@ -352,9 +487,17 @@
   }
   function afterRender() {
     const q = $('q');
-    if (q) q.addEventListener('input', () => { searchQ = q.value; ctxs = {}; $('results').innerHTML = results(); });
-    const s = $('sortSel');
-    if (s) s.addEventListener('change', () => { save('sort', s.value); render(); });
+    if (q) {
+      q.addEventListener('input', onSearchInput);
+      $('qForm').addEventListener('submit', (e) => { e.preventDefault(); clearTimeout(searchT); q.blur(); if (!$('results').querySelector('.sec-web')) $('results').innerHTML = results(); searchWeb(true); });
+      if (searchQ.trim().length >= 2) searchWeb();
+    }
+    const lq = $('libQ');
+    if (lq) lq.addEventListener('input', () => { libQ = lq.value; ctxs = {}; $('libList').innerHTML = libList(libSub); bindSort(); });
+    bindSort();
+    view.querySelectorAll('[data-src]').forEach((c) => { c.onchange = () => { const o = load('sources') || {}; o[c.dataset.src] = c.checked; save('sources', o); web.q = ''; }; });
+    const yf = $('ytForm');
+    if (yf) yf.onsubmit = (e) => { e.preventDefault(); save('ytKey', $('ytKey').value.trim()); web.q = ''; toast($('ytKey').value.trim() ? 'Clave de YouTube guardada' : 'Clave de YouTube borrada', 1800); };
     const quota = $('quota');
     if (quota && navigator.storage && navigator.storage.estimate) navigator.storage.estimate().then((e) => { if (e.quota) quota.textContent = `Espacio usado por la app: ${fmtBytes(e.usage || 0)} de ${fmtBytes(e.quota)} disponibles.`; });
     const ib = $('installBtn');
@@ -365,6 +508,7 @@
       render(true);
     };
   }
+  function bindSort() { const s = $('sortSel'); if (s) s.onchange = () => { save('sort', s.value); render(true); }; }
   // Refrescar solo el resaltado de la canción en curso, sin redibujar la vista.
   function markCurrent() {
     const id = P.currentId();
@@ -454,7 +598,7 @@
 
   /* ---------- Acciones sobre canciones y listas ---------- */
   async function toggleFav(id) {
-    const t = get(id); if (!t) return;
+    const t = get(id); if (!t || t.remote) return;
     t.fav = !t.fav; t.favAt = t.fav ? Date.now() : 0;
     await DB.putTrack(t);
     toast(t.fav ? 'Añadida a Me gusta' : 'Quitada de Me gusta', 1500);
@@ -470,8 +614,25 @@
     });
   }
 
+  function remoteMenu(t) {
+    const id = t.id;
+    openSheet(t.title, `<div class="sheet-track">${coverHTML(t, 'cover-sm')}<span class="row-txt"><strong>${esc(t.title)}</strong><span>${esc(t.artist)} · ${esc(SRC[t.source] || '')}${t.preview ? ' · avance de 30 s' : ''}</span></span></div>` + menu([
+      { id: 'next', icon: 'next', label: 'Reproducir a continuación' },
+      { id: 'queue', icon: 'queue', label: 'Añadir a la cola' },
+      t.saveable && { id: 'save', icon: 'plus', label: 'Guardar sin conexión en mi biblioteca' },
+      { id: 'more', icon: 'search', label: 'Buscar más de ' + t.artist },
+      { id: 'open', icon: 'note', label: 'Abrir en ' + (SRC[t.source] || 'su web') + (t.preview ? ' (canción completa)' : '') }
+    ]), onMenu({
+      next: () => { P.playNext(id); toast('Sonará a continuación', 1500); closeSheet(); },
+      queue: () => { P.enqueue(id); toast('Añadida a la cola', 1500); closeSheet(); },
+      save: async () => { closeSheet(); toast('Guardando…', 60000); try { toast(await saveOffline(t) ? 'Guardada en tu biblioteca' : 'Ya estaba en tu biblioteca', 2000); } catch (e) { toast('No se pudo descargar (' + e.message + ')', 3000); } },
+      more: () => closeAll(() => { searchQ = t.artist; if (route.name === 'buscar') render(); else location.hash = '#/buscar'; }),
+      open: () => { window.open(t.link, '_blank', 'noopener'); closeSheet(); }
+    }));
+  }
   function trackMenu(id, playlistId, idx) {
     const t = get(id); if (!t) return;
+    if (t.remote) return remoteMenu(t);
     const go = (hash) => closeAll(() => { location.hash = hash; });
     openSheet(t.title, `<div class="sheet-track">${coverHTML(t, 'cover-sm')}<span class="row-txt"><strong>${esc(t.title)}</strong><span>${esc(t.artist)} · ${esc(t.album)}</span></span></div>` + menu([
       { id: 'next', icon: 'next', label: 'Reproducir a continuación' },
@@ -570,10 +731,14 @@
 
   /* ---------- Delegación de toques en las vistas ---------- */
   document.addEventListener('click', (e) => {
-    const t = e.target.closest('[data-ctx],[data-more],[data-playall],[data-shuffleall],[data-act],[data-go],[data-listmore],[data-theme-set]');
+    const t = e.target.closest('[data-ctx],[data-more],[data-playall],[data-shuffleall],[data-act],[data-go],[data-listmore],[data-theme-set],[data-retry],[data-iaalbum],[data-ytvideo],[data-iasave]');
     if (!t || t.closest('#sheetBody .menu')) return;
     const d = t.dataset;
-    if (d.ctx) playCtx(d.ctx, +d.i);
+    if (d.retry) retrySrc(d.retry);
+    else if (d.iaalbum) iaAlbum(d.iaalbum);
+    else if (d.ytvideo) ytVideo(d.ytvideo);
+    else if (d.iasave) { const b = $('iaBody'); if (b && b.dataset.ids) saveMany(JSON.parse(b.dataset.ids)); }
+    else if (d.ctx) playCtx(d.ctx, +d.i);
     else if (d.more) trackMenu(d.more, d.pl, +d.pi);
     else if (d.playall) playCtx(d.playall, null, false);
     else if (d.shuffleall) playCtx(d.shuffleall, null, true);
@@ -616,7 +781,7 @@
   $('btnRepeat').addEventListener('click', () => { P.cycleRepeat(); toast({ off: 'Sin repetir', all: 'Repetir todo', one: 'Repetir esta canción' }[P.S.repeat], 1200); });
   $('miniFav').addEventListener('click', () => { const t = P.current(); if (t) toggleFav(t.id); });
   $('npFav').addEventListener('click', () => { const t = P.current(); if (t) toggleFav(t.id); });
-  $('npArtist').addEventListener('click', () => { const t = P.current(); if (t) closeAll(() => { location.hash = '#/artista/' + encodeURIComponent(t.artist); }); });
+  $('npArtist').addEventListener('click', () => { const t = P.current(); if (t) closeAll(() => { if (t.remote) { searchQ = t.artist; if (route.name === 'buscar') render(); else location.hash = '#/buscar'; } else location.hash = '#/artista/' + encodeURIComponent(t.artist); }); });
   $('npMore').addEventListener('click', () => { const t = P.current(); if (t) trackMenu(t.id); });
   $('btnQueue').addEventListener('click', queueSheet);
   $('btnEq').addEventListener('click', eqSheet);
@@ -661,9 +826,9 @@
     if (!t) { if (!np.hidden) closeLayer(); return; }
     const playIcon = (b, playing) => { b.querySelector('use').setAttribute('href', playing ? '#i-pause' : '#i-play'); b.setAttribute('aria-label', playing ? 'Pausar' : 'Reproducir'); };
     playIcon($('miniPlay'), S.playing); playIcon($('btnPlay'), S.playing);
-    for (const b of [$('miniFav'), $('npFav')]) { b.querySelector('use').setAttribute('href', t.fav ? '#i-heart-on' : '#i-heart'); b.classList.toggle('on', !!t.fav); b.setAttribute('aria-label', t.fav ? 'Quitar de Me gusta' : 'Me gusta'); b.setAttribute('aria-pressed', !!t.fav); }
+    for (const b of [$('miniFav'), $('npFav')]) { b.hidden = !!t.remote; b.querySelector('use').setAttribute('href', t.fav ? '#i-heart-on' : '#i-heart'); b.classList.toggle('on', !!t.fav); b.setAttribute('aria-label', t.fav ? 'Quitar de Me gusta' : 'Me gusta'); b.setAttribute('aria-pressed', !!t.fav); }
     $('miniTitle').textContent = t.title; $('miniArtist').textContent = t.artist;
-    $('npTitle').textContent = t.title; $('npArtist').textContent = t.artist; $('npFrom').textContent = S.from || 'Tu biblioteca';
+    $('npTitle').textContent = t.title; $('npArtist').textContent = t.artist + (t.remote ? ' · ' + SRC[t.source] + (t.preview ? ' (avance)' : '') : ''); $('npFrom').textContent = S.from || 'Tu biblioteca';
     if (paintedId !== t.id || !$('npCover').firstChild) {
       paintedId = t.id;
       $('miniCover').outerHTML = coverHTML(t, 'cover-sm').replace('<span class="cover', '<span id="miniCover" class="cover');
@@ -686,14 +851,19 @@
     const id = P.currentId();
     if (P.S.playing && id && id !== lastCounted) {
       lastCounted = id; const t = get(id);
-      if (t) { t.plays = (t.plays || 0) + 1; t.lastPlayed = Date.now(); DB.putTrack(t).catch(() => {}); }
+      if (t && !t.remote) { t.plays = (t.plays || 0) + 1; t.lastPlayed = Date.now(); DB.putTrack(t).catch(() => {}); }
     }
     if ($('queueList')) paintQueue();
+    saveRemote();
   });
   P.ev.addEventListener('ended', () => { lastCounted = null; });
   P.ev.addEventListener('time', paintTime);
   P.ev.addEventListener('missing', () => toast('No se encontró el audio de esta canción'));
-  P.ev.addEventListener('error', () => toast('Este teléfono no puede reproducir este formato', 3000));
+  P.ev.addEventListener('error', () => {
+    const t = P.current();
+    if (t && t.remote) toast(P.EQ.ctx ? `No se pudo reproducir desde ${SRC[t.source]}. Con el ecualizador activo algunas fuentes no suenan: desactívalo y recarga la app.` : `No se pudo reproducir desde ${SRC[t.source]}: puede que ya no esté disponible.`, 4500);
+    else toast('Este teléfono no puede reproducir este formato', 3000);
+  });
   P.ev.addEventListener('slept', () => toast('Temporizador: música en pausa. ¡Que descanses!', 3200));
 
   /* ---------- Cola ---------- */

@@ -9,7 +9,13 @@ Está hecha en HTML, CSS y JavaScript puro, sin dependencias ni paso de compilac
   dentro de la app (IndexedDB), así que siguen disponibles sin conexión.
 - **Lee las etiquetas ID3** de los MP3: título, artista, álbum, número de pista y portada. Si no hay
   etiquetas, deduce «Artista - Título» del nombre del archivo. Los datos se pueden editar.
-- **Biblioteca** por canciones, artistas y álbumes; **buscador** sin distinguir tildes.
+- **Biblioteca** por canciones, artistas y álbumes, con su propio **buscador** (sin distinguir tildes).
+- **Buscar en internet** a la vez, sin cuentas ni servidor propio:
+  - **Audius**: canciones completas de artistas independientes, dentro de Onda.
+  - **Internet Archive**: música libre y conciertos completos; se pueden **guardar sin conexión**.
+  - **Deezer** y **Apple Music**: avances de 30 segundos.
+  - **YouTube**: videos dentro de la app con la clave de API propia de la persona (opcional, en Ajustes).
+  - **Spotify, SoundCloud, YouTube Music…**: abre su app con la búsqueda (no permiten reproducir en otras apps).
 - **Listas** propias y la lista automática **Me gusta**.
 - **Reproductor** a pantalla completa: aleatorio, repetir (todo / una), cola editable, deslizar hacia abajo
   para cerrar y a los lados sobre la portada para cambiar de canción.
@@ -45,5 +51,6 @@ python3 -m http.server 8000
 | `js/tags.js` | Lectura de etiquetas ID3 y duración |
 | `js/player.js` | Motor: cola, aleatorio, repetir, pantalla de bloqueo, ecualizador, temporizador |
 | `js/demo.js` | Composición de las canciones de muestra |
+| `js/online.js` | Búsqueda en internet: Audius, Internet Archive, Deezer, Apple Music, YouTube |
 | `js/app.js` | Interfaz: vistas, listas, buscador, hojas de opciones |
 | `sw.js` | Guarda la app para abrirla sin internet (sube `VERSION` al cambiar archivos) |
